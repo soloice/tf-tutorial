@@ -89,9 +89,10 @@ with tf.variable_scope("decoder"):
     training_decoder = tf.contrib.seq2seq.BasicDecoder(decoder, training_helper,
                                                        encoder_final_state, fc_layer)
 
-    logits, final_state, final_sequence_lengths = tf.contrib.seq2seq.dynamic_decode(training_decoder)
+    logits, final_state, final_sequence_lengths = \
+        tf.contrib.seq2seq.dynamic_decode(training_decoder)
 
-    # decoder_outputs: [B, T, D]
+    # decoder_logits: [B, T, V]
     decoder_logits = logits.rnn_output
     print("logits: ", decoder_logits)
 
@@ -100,23 +101,20 @@ with tf.variable_scope("decoder"):
 stepwise_cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(
     labels=tf.one_hot(decoder_targets, depth=vocab_size, dtype=tf.float32),
     logits=decoder_logits)
-
 print(stepwise_cross_entropy)
 
 mask = tf.sequence_mask(decoder_length,
                         maxlen=tf.reduce_max(decoder_length),
                         dtype=tf.float32)
-# / tf.reduce_sum(mask)
+
 loss = tf.reduce_sum(stepwise_cross_entropy * mask) / tf.reduce_sum(mask)
 train_op = tf.train.AdamOptimizer().minimize(loss)
 
-# Though its possible to decode multiple sequences in parallel, we decoder only 1 sequence at a time
+
 num_sequences_to_decode = tf.placeholder(shape=(), dtype=tf.int32, name="num_seq")
 start_tokens = tf.tile([GO], [num_sequences_to_decode])
-inference_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(decoder_embedding_matrix,
-                                                            start_tokens,
-                                                            end_token=EOS)
-
+inference_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+    decoder_embedding_matrix, start_tokens, end_token=EOS)
 
 greedy_decoder = tf.contrib.seq2seq.BasicDecoder(
     cell=decoder, helper=inference_helper,
@@ -129,14 +127,14 @@ greedy_decoding_result, _1, _2 = tf.contrib.seq2seq.dynamic_decode(
 
 def get_decoder_input_and_output(ids):
     B, T = ids.shape
-    go_ids = np.c_[np.zeros([B, 1], dtype=np.int32), ids]
+    go_ids = np.c_[np.zeros([B, 1], dtype=np.int32) + GO, ids]
     return go_ids[:, :-1], go_ids[:, 1:]
 
 
 print("build graph ok!")
 
 
-max_batches = 10001
+max_batches = 5001
 batches_in_epoch = 100
 
 
@@ -147,7 +145,6 @@ with tf.Session() as sess:
         x, y, lx, ly = generate_data()
         y_in, y_out = get_decoder_input_and_output(y)
         # print(x, y, lx, ly, y_in, y_out)
-
         feed = {encoder_inputs: x,
                 decoder_inputs: y_in,
                 decoder_targets: y_out,
@@ -162,10 +159,11 @@ with tf.Session() as sess:
 
             print('batch {}'.format(batch_id))
             print('  minibatch loss: {}'.format(loss_))
+            feed = {encoder_inputs: x,
+                    encoder_length: lx,
+                    num_sequences_to_decode: number_samples_to_draw}
             greedy_prediction = sess.run(greedy_decoding_result,
-                                         feed_dict={encoder_inputs: x,
-                                                    encoder_length: lx,
-                                                    num_sequences_to_decode: number_samples_to_draw})
+                                         feed_dict=feed)
             print("=" * 100)
             print("Sample x:")
             print(x)
