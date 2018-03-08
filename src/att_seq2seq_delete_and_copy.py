@@ -6,6 +6,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
 import argparse
+from tensorflow.contrib.tensorboard.plugins import projector
 
 
 parser = argparse.ArgumentParser()
@@ -19,7 +20,7 @@ FLAGS, unparsed = parser.parse_known_args()
 
 
 def plot_attention_matrix(src, tgt, matrix,
-                          name="../attention-seq2seq/attention_matrix.png"):
+                          name="attention_matrix.png"):
     src = [str(item) for item in src]
     tgt = [str(item) for item in tgt]
     df = pd.DataFrame(matrix, index=src, columns=tgt)
@@ -85,17 +86,19 @@ save_path = "../attention-seq2seq/"
 if not os.path.exists(save_path):
     os.mkdir(save_path)
 
+picture_path = os.path.join(save_path, "pics")
+if not os.path.exists(picture_path):
+    os.mkdir(picture_path)
+
 model_path = os.path.join(save_path, "model")
 if not os.path.exists(model_path):
     os.mkdir(model_path)
 
-summary_path = os.path.join(save_path, "summary")
-if not os.path.exists(summary_path):
-    os.mkdir(summary_path)
-
-picture_path = os.path.join(save_path, "pics")
-if not os.path.exists(picture_path):
-    os.mkdir(picture_path)
+label_file_name = "labels.tsv"
+with open(os.path.join(model_path, label_file_name), "w") as f:
+    f.write("Number\tIsOdd\n")
+    for i in range(vocab_size):
+        f.write(str(i) + "\t" + str(i%2) + "\n")
 
 
 encoder_embedding_size, decoder_embedding_size = 30, 30
@@ -118,6 +121,8 @@ encoder_embedding_matrix = tf.Variable(tf.truncated_normal([vocab_size, encoder_
 decoder_embedding_matrix = tf.Variable(tf.truncated_normal([vocab_size, decoder_embedding_size],
                                                            mean=0.0, stddev=0.1),
                                        dtype=tf.float32, name="decoder_embedding_matrix")
+
+tf.summary.histogram("embeddings", encoder_embedding_matrix)
 
 # [B, T, D]
 encoder_inputs_embedded = tf.nn.embedding_lookup(encoder_embedding_matrix, encoder_inputs)
@@ -147,7 +152,6 @@ with tf.variable_scope("decoder"):
 
     attn_decoder = tf.contrib.seq2seq.AttentionWrapper(
         decoder, attention_mechanism,
-        # cell_input_fn=lambda inputs, attention: inputs,
         alignment_history=True, output_attention=True)
 
 
@@ -185,6 +189,7 @@ mask = tf.sequence_mask(decoder_length,
                         dtype=tf.float32)
 
 loss = tf.reduce_sum(stepwise_cross_entropy * mask) / tf.reduce_sum(mask)
+tf.summary.scalar("loss", loss)
 train_op = tf.train.AdamOptimizer().minimize(loss)
 
 
@@ -208,6 +213,8 @@ greedy_decoding_result, greedy_final_state, _2 = tf.contrib.seq2seq.dynamic_deco
 # [decoder_steps, batch_size, encoder_steps]
 inference_attention_matrices = greedy_final_state.alignment_history.stack(
     name="inference_attention_matrix")
+
+merged_summary = tf.summary.merge_all()
 
 
 def get_decoder_input_and_output(ids):
@@ -252,7 +259,8 @@ def draw_samples(session, number_samples_to_draw=3, global_step=-1):
     y_valid = y_[i, :y_len]
     # print(x_valid)
     # print(y_valid)
-    file_name = "../attention-seq2seq/attention_matrix-" + str(global_step) + ".png"
+    file_name = os.path.join(picture_path,
+                             "attention_matrix-" + str(global_step) + ".png")
     plot_attention_matrix(src=x_valid, tgt=y_valid,
                           matrix=matrix[:lx[i], :y_len],
                           name=file_name)
@@ -266,6 +274,13 @@ model_name = os.path.join(model_path, "att-seq2seq")
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
+    train_writer = tf.summary.FileWriter(model_path, sess.graph)
+    config = projector.ProjectorConfig()
+    # config.model_checkpoint_path = model_name
+    embedding = config.embeddings.add()
+    embedding.tensor_name = encoder_embedding_matrix.name
+    embedding.metadata_path = label_file_name
+    projector.visualize_embeddings(train_writer, config)
 
     name = tf.train.latest_checkpoint(model_path)
     start_step = 0
@@ -285,14 +300,21 @@ with tf.Session() as sess:
                 decoder_targets: y_out,
                 encoder_length: lx,
                 decoder_length: ly}
-        _, loss_, att = sess.run([train_op, loss, attention_matrices], feed_dict=feed)
+        _, loss_, att, summaries = sess.run(
+            [train_op, loss, attention_matrices, merged_summary],
+            feed_dict=feed)
         # print(att.shape, max(lx), max(ly))
 
+        train_writer.add_summary(summary=summaries,
+                                 global_step=batch_id)
+
         if batch_id % save_period == 0:
-            # saver.save(sess, save_path=model_name, global_step=batch_id)
+            saver.save(sess, save_path=model_name, global_step=batch_id)
             print('batch {}'.format(batch_id))
             print('  minibatch loss: {}'.format(loss_))
             draw_samples(session=sess, global_step=batch_id)
+
+    train_writer.close()
 
     print("Finish training!")
     draw_samples(session=sess)
