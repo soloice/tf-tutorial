@@ -1,3 +1,5 @@
 .idea/
 src/MNIST_data/
+attention-seq2seq/
+
 *.zip
