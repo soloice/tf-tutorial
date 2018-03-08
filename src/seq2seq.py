@@ -1,6 +1,18 @@
 import tensorflow as tf
 import numpy as np
 import random
+import argparse
+
+
+parser = argparse.ArgumentParser()
+parser.register("type", "bool", lambda v: v.lower() == "true")
+parser.add_argument(
+    "--copy",
+    type=bool,
+    default=False,
+    help="Whether or not to copy the sequence.")
+FLAGS, unparsed = parser.parse_known_args()
+
 
 vocab_size = 10 + 1 # 1~10 + 0
 max_len = 24
@@ -13,11 +25,14 @@ GO = 0
 odd_list, even_list = [1, 3, 5, 7, 9] * 10, [2, 4, 6, 8, 10] * 10
 
 
-def generate_data(num_samples=batch_size):
+def generate_data(num_samples=batch_size, copy_sequence=False):
     num_odds = np.random.randint(low=1, high=max_len//2, size=num_samples)
-    num_evens = np.random.randint(low=1, high=max_len // 2, size=num_samples)
+    num_evens = np.random.randint(low=1, high=max_len//2, size=num_samples)
     batch_len_x = num_odds + num_evens
-    batch_len_y = num_evens + 1  # <EOS>/<GO>
+    if copy_sequence:
+        batch_len_y = num_evens * 2 + 1  # append <EOS> (or prepend <GO>)
+    else:
+        batch_len_y = num_evens + 1  # append <EOS> (or prepend <GO>)
 
     batch_max_length_x = np.max(batch_len_x)
     batch_max_length_y = np.max(batch_len_y)
@@ -30,6 +45,8 @@ def generate_data(num_samples=batch_size):
         random.shuffle(sample_x)
 
         sample_y = list(filter(lambda x: x % 2 == 0, sample_x))
+        if copy_sequence:
+            sample_y += sample_y
         sample_x = np.r_[sample_x, [PAD] * (batch_max_length_x - len(sample_x))]
         sample_y = np.r_[sample_y, [EOS], [PAD] * (batch_max_length_y - len(sample_y) - 1)]
 
@@ -142,7 +159,7 @@ loss_track = []
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     for batch_id in range(max_batches):
-        x, y, lx, ly = generate_data()
+        x, y, lx, ly = generate_data(copy_sequence=FLAGS.copy)
         y_in, y_out = get_decoder_input_and_output(y)
         # print(x, y, lx, ly, y_in, y_out)
         feed = {encoder_inputs: x,
@@ -155,7 +172,8 @@ with tf.Session() as sess:
 
         if batch_id == 0 or batch_id % batches_in_epoch == 0:
             number_samples_to_draw = 3
-            x, y, lx, ly = generate_data(num_samples=number_samples_to_draw)
+            x, y, lx, ly = generate_data(num_samples=number_samples_to_draw,
+                                         copy_sequence=FLAGS.copy)
 
             print('batch {}'.format(batch_id))
             print('  minibatch loss: {}'.format(loss_))
@@ -171,6 +189,3 @@ with tf.Session() as sess:
             print(y)
             print("Greedy Decoding result:")
             print(greedy_prediction.sample_id)
-
-
-# generate_data()

@@ -5,9 +5,21 @@ import os
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
+import argparse
 
 
-def plot_align_matrix(src, tgt, matrix):
+parser = argparse.ArgumentParser()
+parser.register("type", "bool", lambda v: v.lower() == "true")
+parser.add_argument(
+    "--copy",
+    type=bool,
+    default=True,
+    help="Whether or not to copy the sequence.")
+FLAGS, unparsed = parser.parse_known_args()
+
+
+def plot_attention_matrix(src, tgt, matrix,
+                          name="../attention-seq2seq/attention_matrix.png"):
     src = [str(item) for item in src]
     tgt = [str(item) for item in tgt]
     df = pd.DataFrame(matrix, index=src, columns=tgt)
@@ -16,14 +28,16 @@ def plot_align_matrix(src, tgt, matrix):
     ax.set_ylabel("source")
     plt.xticks(rotation=90)
     plt.yticks(rotation=0)
-    ax.set_title("alignment heatmap")
-    plt.show()
+    ax.set_title("Attention heatmap")
+    plt.savefig(name, bbox_inches='tight')
+    plt.gcf().clear()
+    # plt.show()
     return matrix
 
 
 vocab_size = 10 + 1 # 1~10 + 0
 max_len = 24
-MAX_DECODE_STEP = max_len
+MAX_DECODE_STEP = max_len + 5
 batch_size = 64
 PAD = 0
 EOS = 0
@@ -33,11 +47,14 @@ GO = 0
 odd_list, even_list = [1, 3, 5, 7, 9] * 10, [2, 4, 6, 8, 10] * 10
 
 
-def generate_data(num_samples=batch_size):
+def generate_data(num_samples=batch_size, copy_sequence=True):
     num_odds = np.random.randint(low=1, high=max_len//2, size=num_samples)
     num_evens = np.random.randint(low=1, high=max_len//2, size=num_samples)
     batch_len_x = num_odds + num_evens
-    batch_len_y = num_evens + 1  # <EOS>/<GO>
+    if copy_sequence:
+        batch_len_y = num_evens * 2 + 1  # append <EOS> (or prepend <GO>)
+    else:
+        batch_len_y = num_evens + 1  # append <EOS> (or prepend <GO>)
 
     batch_max_length_x = np.max(batch_len_x)
     batch_max_length_y = np.max(batch_len_y)
@@ -50,6 +67,8 @@ def generate_data(num_samples=batch_size):
         random.shuffle(sample_x)
 
         sample_y = list(filter(lambda x: x % 2 == 0, sample_x))
+        if copy_sequence:
+            sample_y += sample_y
         sample_x = np.r_[sample_x, [PAD] * (batch_max_length_x - len(sample_x))]
         sample_y = np.r_[sample_y, [EOS], [PAD] * (batch_max_length_y - len(sample_y) - 1)]
 
@@ -73,6 +92,10 @@ if not os.path.exists(model_path):
 summary_path = os.path.join(save_path, "summary")
 if not os.path.exists(summary_path):
     os.mkdir(summary_path)
+
+picture_path = os.path.join(save_path, "pics")
+if not os.path.exists(picture_path):
+    os.mkdir(picture_path)
 
 
 encoder_embedding_size, decoder_embedding_size = 30, 30
@@ -196,9 +219,10 @@ def get_decoder_input_and_output(ids):
 print("build graph ok!")
 
 
-def draw_samples(session, number_samples_to_draw=3):
+def draw_samples(session, number_samples_to_draw=3, global_step=-1):
 
-    x, y, lx, ly = generate_data(num_samples=number_samples_to_draw)
+    x, y, lx, ly = generate_data(num_samples=number_samples_to_draw,
+                                 copy_sequence=FLAGS.copy)
     feed = {encoder_inputs: x,
             encoder_length: lx,
             num_sequences_to_decode: number_samples_to_draw}
@@ -228,12 +252,14 @@ def draw_samples(session, number_samples_to_draw=3):
     y_valid = y_[i, :y_len]
     # print(x_valid)
     # print(y_valid)
-    plot_align_matrix(src=x_valid, tgt=y_valid,
-                      matrix=matrix[:lx[i], :y_len])
+    file_name = "../attention-seq2seq/attention_matrix-" + str(global_step) + ".png"
+    plot_attention_matrix(src=x_valid, tgt=y_valid,
+                          matrix=matrix[:lx[i], :y_len],
+                          name=file_name)
 
 
 max_batches = 5001
-save_period = 500
+save_period = 100
 
 saver = tf.train.Saver()
 model_name = os.path.join(model_path, "att-seq2seq")
@@ -251,7 +277,7 @@ with tf.Session() as sess:
         print("No previous checkpoints!")
 
     for batch_id in range(start_step, max_batches):
-        x, y, lx, ly = generate_data()
+        x, y, lx, ly = generate_data(copy_sequence=FLAGS.copy)
         y_in, y_out = get_decoder_input_and_output(y)
         # print(x, y, lx, ly, y_in, y_out)
         feed = {encoder_inputs: x,
@@ -266,7 +292,7 @@ with tf.Session() as sess:
             # saver.save(sess, save_path=model_name, global_step=batch_id)
             print('batch {}'.format(batch_id))
             print('  minibatch loss: {}'.format(loss_))
-            draw_samples(session=sess)
+            draw_samples(session=sess, global_step=batch_id)
 
     print("Finish training!")
     draw_samples(session=sess)
