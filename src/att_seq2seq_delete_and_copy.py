@@ -152,8 +152,8 @@ with tf.variable_scope("decoder"):
 
     attn_decoder = tf.contrib.seq2seq.AttentionWrapper(
         decoder, attention_mechanism,
+        # cell_input_fn=lambda inputs, attention: inputs,
         alignment_history=True, output_attention=True)
-
 
     fc_layer = tf.layers.Dense(vocab_size)
 
