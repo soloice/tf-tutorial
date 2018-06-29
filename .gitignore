@@ -1,4 +1,6 @@
 .idea/
+.DS_Store
+
 src/MNIST_data/
 attention-seq2seq/
 
