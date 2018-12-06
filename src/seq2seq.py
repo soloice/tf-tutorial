@@ -96,7 +96,7 @@ with tf.variable_scope("encoder"):
 
 
 with tf.variable_scope("decoder"):
-    decoder_layers = [tf.contrib.rnn.BasicLSTMCell(encoder_hidden_units)
+    decoder_layers = [tf.contrib.rnn.BasicLSTMCell(decoder_hidden_units)
                       for _ in range(decoder_lstm_layers)]
     decoder = tf.contrib.rnn.MultiRNNCell(decoder_layers)
     fc_layer = tf.layers.Dense(vocab_size)

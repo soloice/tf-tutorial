@@ -1,3 +1,4 @@
+# coding=utf-8
 import tensorflow as tf
 import numpy as np
 import random
@@ -152,7 +153,7 @@ with tf.variable_scope("decoder"):
 
     attn_decoder = tf.contrib.seq2seq.AttentionWrapper(
         decoder, attention_mechanism,
-        # cell_input_fn=lambda inputs, attention: inputs,
+        # cell_input_fn=lambda inputs, attention: inputs,  # disable input-feeding mechanism
         alignment_history=True, output_attention=True)
 
     fc_layer = tf.layers.Dense(vocab_size)
